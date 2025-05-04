@@ -3,105 +3,106 @@ import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import GradientBoostingClassifier
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense
 
 # Title
-st.title("Academic Performance & Study Habits Predictor")
+st.title("Student Performance and Study Habits Predictor")
 
-# User Inputs
-hours_studied = st.slider("Hours Studied per Day", 0.0, 12.0, 4.0)
-attendance = st.slider("Attendance (%)", 0, 100, 75)
-sleep_hours = st.slider("Sleep Hours per Night", 0.0, 12.0, 7.0)
-assignments_completed = st.slider("Assignments Completed (out of 10)", 0, 10, 7)
-extra_activities = st.slider("No. of Extra Activities", 0, 5, 2)
-past_grades = st.slider("Past Grade (%)", 0.0, 100.0, 75.0)
+# Real-time input form
+st.subheader("Enter Student Data")
+study_time = st.slider("Study Time (hrs/day)", 0, 10, 2)
+sleep_time = st.slider("Sleep Time (hrs/day)", 0, 10, 6)
+attendance = st.slider("Attendance (%)", 0, 100, 85)
+assignments = st.slider("Assignment Completion (%)", 0, 100, 80)
+participation = st.slider("Class Participation (%)", 0, 100, 70)
+social_media = st.slider("Social Media Usage (hrs/day)", 0, 10, 3)
 
-# Define real classification logic based on thresholds
-def assign_category(row):
-    score = (
-        (row["hours_studied"] * 0.2) +
-        (row["attendance"] * 0.2) +
-        (row["sleep_hours"] * 0.1) +
-        (row["assignments_completed"] * 0.2) +
-        (row["past_grades"] * 0.2) -
-        (row["extra_activities"] * 0.1)
-    )
-    if score < 50:
-        return "At Risk"
-    elif score < 65:
-        return "Needs Improvement"
-    elif score < 80:
-        return "Satisfactory"
-    else:
-        return "Excellent"
-
-# Generate realistic dataset
-np.random.seed(42)
+# Example dataset (mockup for structure)
 data = {
-    "hours_studied": np.random.normal(5, 2, 200).clip(0, 12),
-    "attendance": np.random.normal(85, 10, 200).clip(50, 100),
-    "sleep_hours": np.random.normal(7, 1.5, 200).clip(3, 10),
-    "assignments_completed": np.random.randint(0, 11, 200),
-    "extra_activities": np.random.randint(0, 6, 200),
-    "past_grades": np.random.normal(75, 15, 200).clip(0, 100),
+    "study_time": np.random.randint(1, 6, 200),
+    "sleep_time": np.random.randint(4, 10, 200),
+    "attendance": np.random.randint(50, 100, 200),
+    "assignments": np.random.randint(50, 100, 200),
+    "participation": np.random.randint(30, 100, 200),
+    "social_media": np.random.randint(0, 6, 200),
 }
-df = pd.DataFrame(data)
-df["performance"] = df.apply(assign_category, axis=1)
 
-# Features and Labels
+df = pd.DataFrame(data)
+
+# Target based on custom logic (for demonstration)
+conditions = (
+    (df["study_time"] >= 4) & 
+    (df["attendance"] >= 85) & 
+    (df["assignments"] >= 85) &
+    (df["participation"] >= 80) &
+    (df["social_media"] <= 3)
+)
+
+df["performance"] = np.where(conditions, "Excellent", 
+                     np.where((df["attendance"] < 60) | (df["assignments"] < 60), "At Risk",
+                     np.where((df["attendance"] < 75) | (df["assignments"] < 75), "Needs Improvement", 
+                     "Satisfactory")))
+
+# Feature and label split
 X = df.drop("performance", axis=1)
 y = df["performance"]
 
-# Preprocessing
+# Label Encoding
+label_encoder = LabelEncoder()
+y_encoded = label_encoder.fit_transform(y)
+
+# Scale features
 scaler = StandardScaler()
 X_scaled = scaler.fit_transform(X)
 
 # Split
-X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42)
+X_train, X_test, y_train, y_test = train_test_split(X_scaled, y_encoded, test_size=0.2, random_state=42)
 
-# Gradient Boosting Model
+# Gradient Boosting model
 gb_model = GradientBoostingClassifier()
 gb_model.fit(X_train, y_train)
 
-# DNN Model
+# DNN model
 model_dnn = Sequential([
-    Dense(32, activation='relu', input_shape=(X.shape[1],)),
-    Dense(16, activation='relu'),
-    Dense(4, activation='softmax')
+    Dense(64, activation='relu', input_shape=(X_train.shape[1],)),
+    Dense(32, activation='relu'),
+    Dense(len(np.unique(y_encoded)), activation='softmax')
 ])
 model_dnn.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+model_dnn.fit(X_train, y_train, epochs=20, batch_size=16, verbose=0)
 
-# Encode labels numerically for DNN
-label_map = {label: idx for idx, label in enumerate(np.unique(y))}
-y_train_num = np.array([label_map[label] for label in y_train])
-model_dnn.fit(X_train, y_train_num, epochs=20, batch_size=16, verbose=0)
-
-# Combine predictions (majority logic)
-input_data = np.array([[hours_studied, attendance, sleep_hours, assignments_completed, extra_activities, past_grades]])
+# Prepare user input
+input_data = np.array([[study_time, sleep_time, attendance, assignments, participation, social_media]])
 input_scaled = scaler.transform(input_data)
 
-gb_pred = gb_model.predict(input_scaled)[0]
+# Predictions
+gb_pred_idx = gb_model.predict(input_scaled)[0]
 dnn_pred_idx = np.argmax(model_dnn.predict(input_scaled, verbose=0))
-dnn_pred = list(label_map.keys())[list(label_map.values()).index(dnn_pred_idx)]
 
-final_prediction = gb_pred if gb_pred == dnn_pred else dnn_pred
+gb_pred = label_encoder.inverse_transform([gb_pred_idx])[0]
+dnn_pred = label_encoder.inverse_transform([dnn_pred_idx])[0]
 
-# Metrics
-y_pred_gb = gb_model.predict(X_test)
-accuracy = accuracy_score(y_test, y_pred_gb)
-precision = precision_score(y_test, y_pred_gb, average='weighted', zero_division=0)
-recall = recall_score(y_test, y_pred_gb, average='weighted', zero_division=0)
-f1 = f1_score(y_test, y_pred_gb, average='weighted', zero_division=0)
+# Display Results
+st.subheader("Predicted Academic Performance:")
+st.write(f"**Gradient Boosting:** {gb_pred}")
+st.write(f"**Deep Neural Network:** {dnn_pred}")
 
-# Results
-st.subheader("Prediction")
-st.success(f"Predicted Performance: **{final_prediction}**")
+# Evaluate
+gb_test_pred = gb_model.predict(X_test)
+dnn_test_pred = np.argmax(model_dnn.predict(X_test, verbose=0), axis=1)
 
-st.subheader("Model Evaluation Metrics (Gradient Boosting)")
-st.write(f"**Accuracy:** {accuracy:.2f}")
-st.write(f"**Precision:** {precision:.2f}")
-st.write(f"**Recall:** {recall:.2f}")
-st.write(f"**F1 Score:** {f1:.2f}")
+st.subheader("Model Evaluation Metrics:")
+st.write("**Gradient Boosting Classifier:**")
+st.write(f"- Accuracy: {accuracy_score(y_test, gb_test_pred):.2f}")
+st.write(f"- Precision: {precision_score(y_test, gb_test_pred, average='weighted'):.2f}")
+st.write(f"- Recall: {recall_score(y_test, gb_test_pred, average='weighted'):.2f}")
+st.write(f"- F1 Score: {f1_score(y_test, gb_test_pred, average='weighted'):.2f}")
+
+st.write("**Deep Neural Network:**")
+st.write(f"- Accuracy: {accuracy_score(y_test, dnn_test_pred):.2f}")
+st.write(f"- Precision: {precision_score(y_test, dnn_test_pred, average='weighted'):.2f}")
+st.write(f"- Recall: {recall_score(y_test, dnn_test_pred, average='weighted'):.2f}")
+st.write(f"- F1 Score: {f1_score(y_test, dnn_test_pred, average='weighted'):.2f}")
